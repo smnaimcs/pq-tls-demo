@@ -1,0 +1,23 @@
+Go version: go1.25.0
+HNDL Controlled Experiment
+==========================
+
+This is a controlled secret-recovery experiment.
+It is NOT a real TLS passive decryption attack.
+
+Classical X25519 experiment
+  Shared secret agreement: PASS
+  Controlled secret recovery: PASS
+  Recorded message recovery: PASS
+
+Hybrid dependency experiment
+  Hybrid secret generation: PASS
+  Classical-only reconstruction: DIFFERENT SECRET (expected)
+
+Conclusion:
+  Classical-only recovery can reproduce the classical
+  derived secret in this controlled experiment.
+
+  The hybrid demonstration requires both the classical
+  and post-quantum components to reproduce the combined
+  secret.

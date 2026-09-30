@@ -1,0 +1,45 @@
+{
+  "environment": {
+    "go_version": "go1.25.0",
+    "goos": "linux",
+    "goarch": "amd64",
+    "num_cpu": 12,
+    "warmup": 20,
+    "count": 100,
+    "started_at": "2026-09-29T23:13:39Z",
+    "finished_at": "2026-09-29T23:13:39Z"
+  },
+  "classical": {
+    "mode": "Classical X25519",
+    "handshakes": 100,
+    "successful": 100,
+    "failed": 0,
+    "mean_ms": 0.611327,
+    "median_ms": 0.598063,
+    "p95_ms": 0.811268,
+    "p99_ms": 1.007439,
+    "min_ms": 0.403034,
+    "max_ms": 1.536012,
+    "total_duration_ms": 61.19954
+  },
+  "hybrid": {
+    "mode": "Hybrid X25519MLKEM768",
+    "handshakes": 100,
+    "successful": 100,
+    "failed": 0,
+    "mean_ms": 0.901542,
+    "median_ms": 0.920314,
+    "p95_ms": 1.21884,
+    "p99_ms": 1.482229,
+    "min_ms": 0.562296,
+    "max_ms": 2.187666,
+    "total_duration_ms": 90.221043
+  },
+  "relative_mean_latency": 1.4747295637195805,
+  "notes": [
+    "Results are experimental measurements on this host; not universal performance factors.",
+    "Results depend on CPU, Go version, OS, network stack, system load, and workload.",
+    "Handshake byte sizes are not reported: Go crypto/tls does not expose total handshake sizes.",
+    "Warm-up handshakes are excluded from reported statistics."
+  ]
+}

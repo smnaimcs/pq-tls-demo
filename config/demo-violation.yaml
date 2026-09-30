@@ -1,0 +1,5 @@
+# Intentional misconfiguration for policy-enforcement demonstration.
+# Classical negotiation succeeds at TLS layer; HYBRID_REQUIRED marks a
+# policy violation. This is NOT an attack simulation.
+provider: classical
+policy: HYBRID_REQUIRED

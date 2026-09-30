@@ -1,166 +1,230 @@
-# pq-tls-demo — Iteration 1: Hybrid TLS Handshake Baseline
+# pq-tls-demo
 
-Minimal localhost HTTPS client/server that performs a **real TLS 1.3 handshake**
-using the hybrid key-exchange group **X25519MLKEM768**, with independently
-verifiable evidence from Go `ConnectionState` and (optionally) Wireshark.
+Localhost TLS 1.3 prototype exploring **crypto-agile migration** from classical
+X25519 toward hybrid post-quantum key establishment (`X25519MLKEM768`), with
+configuration, inventory, policy assessment, a controlled HNDL educational
+experiment, and handshake benchmarking — using Go’s standard `crypto/tls`
+(plus YAML for configuration).
 
-## Overview
+## Problem
 
-**X25519MLKEM768** is a hybrid TLS 1.3 key-exchange mechanism (IANA NamedGroup /
-code point `4588` / `0x11EC`). It combines classical X25519 with the ML-KEM-768
-post-quantum KEM so that the shared secret remains secure if either component
-holds.
+Services that protect long-lived sensitive data face a harvest-now-decrypt-later
+(HNDL) concern if classical key establishment is later broken. Moving to hybrid
+PQ key establishment is not only an algorithm change: operators must configure
+posture, observe negotiation, assess policy compliance, and measure overhead
+without rewriting application logic for every cryptographic mode.
 
-This is a **key-exchange group**, not a cipher suite:
+## Research Question
 
-| Concept | Example | Meaning |
+> How can a TLS service migrate from classical X25519 toward hybrid
+> post-quantum key establishment while making its cryptographic configuration,
+> negotiated state, policy compliance, HNDL implications, and performance
+> overhead observable?
+
+| Concern | Iteration |
+| --- | --- |
+| Configuration | 2 |
+| Observability / inventory | 3 |
+| HNDL conceptual risk | 4 |
+| Policy enforcement | 5 |
+| Performance measurement | 5 |
+
+## What We Built
+
+Five incremental iterations on one prototype:
+
+1. Real TLS 1.3 hybrid handshake (`X25519MLKEM768`)
+2. Configuration-driven `CryptoProvider` (classical / hybrid)
+3. CBOM-inspired cryptographic inventory (`/cbom`)
+4. Controlled HNDL educational secret-recovery experiment
+5. Crypto policy enforcement, security events, `/status`, benchmarking
+
+## Key Contributions
+
+- **Provider ≠ policy** — what TLS offers vs what the application accepts
+- Deterministic policy matrix with structured events (not “attack detected”)
+- Factual inventory separating **configured** vs **negotiated** cryptography
+- Reproducible demo script and documented benchmark methodology
+- Explicit scientific limitations (prototype, not production migration)
+
+## Architecture
+
+```text
+Configuration → CryptoProvider + Policy → TLS 1.3 → ConnectionState
+                     → Inventory (/cbom)
+                     → Policy evaluation → Security events
+Benchmark mode (separate) measures handshake latency
+```
+
+See `docs/architecture.md` for Mermaid diagrams.
+
+## Supported Cryptographic Modes
+
+| Provider | Offered key agreement |
+| --- | --- |
+| `classical` | X25519 |
+| `hybrid` | X25519MLKEM768 |
+
+Authentication certificates in this demo are self-signed **ECDSA P-256**
+(localhost). That is not a post-quantum certificate claim.
+
+## Policy Modes
+
+| Policy | X25519MLKEM768 | X25519 |
 | --- | --- | --- |
-| Key exchange group | `X25519MLKEM768` | How the handshake derives the shared secret |
-| Cipher suite | `TLS_AES_128_GCM_SHA256` | Record-layer AEAD + hash after the handshake |
+| `HYBRID_REQUIRED` | compliant | **violation** |
+| `HYBRID_PREFERRED` | compliant | fallback (allowed, not preferred) |
+| `LEGACY_ALLOWED` | compliant | compliant |
 
-This demo uses only Go’s standard `crypto/tls` (no liboqs, CIRCL, CGO, or
-OpenSSL). It is **localhost-only** (`127.0.0.1:8443`).
+Classical negotiation under `HYBRID_PREFERRED` is **not** labeled an attack.
 
-## Requirements
+## Cryptographic Inventory
 
-- Go **1.24+** (prefer **1.26+** if available)
-- Linux recommended for Wireshark capture on the loopback interface
+`GET /cbom` returns a **CBOM-inspired** JSON inventory (not CycloneDX schema
+compliance). It includes provider, configured key agreement, and — only after a
+real TLS connection — negotiated key agreement and record-layer cipher suite
+from `tls.ConnectionState`. Unknown groups are classified as `unknown`, never
+silently as classical.
+
+## HNDL Educational Experiment
+
+```bash
+go run . --experiment=hndl
+```
+
+**Demonstrated:** a deliberately retained educational X25519 ephemeral secret
+can reconstruct a controlled shared secret / derived key; for a hybrid
+educational model (`classicalSecret + pqSecret → hybridSecret`), recovering
+only the classical component is insufficient.
+
+**Not demonstrated:** decrypting real TLS 1.3 sessions with a certificate
+private key; quantum cryptanalysis; breaking ML-KEM; extracting Go’s TLS key
+schedule; reproducing a passive Internet attack.
+
+## Benchmark Methodology
+
+```bash
+go run . --benchmark --count=1000 --warmup=100
+go run . --benchmark --count=100 --warmup=20 --json   # also written by demo script
+```
+
+- Warm-up excluded from statistics
+- Fresh TLS connection per sample
+- Reports mean, median, p95, p99, success/fail counts
+- **No invented handshake byte sizes**
+- Results are host-specific experimental measurements
+
+Outputs from the demo script: `results/benchmark.json`, `results/benchmark.csv`.
+
+## Quick Start
+
+Requirements: Go **1.24+** (this repo targets **1.25**).
 
 ```bash
 go version
+go run . --version
+
+go run . server --config=config/demo-hybrid.yaml
+# other terminal:
+go run . client --mode=hybrid
 ```
 
-Go 1.24+ exposes `tls.X25519MLKEM768` in the standard library. Explicit
-`CurvePreferences` make the hybrid group mandatory for this experiment.
-`GODEBUG=tlsmlkem=1` is **not** required.
+## Reproduce the Demo
 
-If your Go toolchain does not provide `tls.X25519MLKEM768`, the program will
-fail to build rather than silently falling back to classical X25519.
+```bash
+./scripts/run-demo.sh
+```
 
-## Project layout
+Deterministic scenarios:
+
+| Case | Config | Client | Expected |
+| --- | --- | --- | --- |
+| A Classical | `demo-classical.yaml` | `--mode=classical` | TLS 1.3, X25519, compliant |
+| B Hybrid | `demo-hybrid.yaml` | `--mode=hybrid` | TLS 1.3, X25519MLKEM768, compliant |
+| C Violation | `demo-violation.yaml` | `--mode=classical` | policy **violation** (not attack proof) |
+
+Case C uses classical provider + `HYBRID_REQUIRED` so TLS negotiates X25519 and
+the evaluator emits `CRYPTO_POLICY_VIOLATION`.
+
+## Test
+
+```bash
+gofmt -w .
+go test ./...
+go test -race ./...
+```
+
+## Results
+
+See `results/` after running the demo script, and `docs/evaluation.md` §8.
+Do not treat a single laptop run as a universal performance factor.
+
+## Demonstrated vs Not Demonstrated
+
+### Demonstrated
+
+- TLS 1.3 with X25519 and X25519MLKEM768 via Go `crypto/tls`
+- YAML-driven provider + policy (fail-closed validation)
+- Inventory, status, and security-event endpoints
+- Policy compliance / fallback / violation classification
+- Controlled HNDL educational experiment
+- Handshake latency benchmarking with documented methodology
+- Reproducible one-command demo
+
+### Not demonstrated
+
+- Formal cryptographic proofs
+- Real quantum attack simulation
+- Production key / certificate management or HSMs
+- Persistent security-event storage
+- Full CycloneDX CBOM compliance
+- Active network attack attribution
+- Universal performance conclusions
+- Automatic enterprise-wide migration
+- Kubernetes / dashboards / production orchestration
+
+## Limitations
+
+This remains a **prototype**. Hybrid key establishment here does not mean every
+cryptographic component is post-quantum. Policy violations are configuration /
+negotiation assessments, not attack detections. See `docs/evaluation.md` §9.
+
+## Project Structure
 
 ```text
 pq-tls-demo/
-├── go.mod
-├── main.go              # server + client
-├── cert.go              # programmatic localhost certificate
-├── integration_test.go  # asserts TLS 1.3 + X25519MLKEM768
+├── main.go, cert.go, config.go, posture_store.go, version.go
+├── integration_test.go
+├── config/           # default + deterministic demo YAML
+├── crypto/           # providers, inventory, policy, events
+├── experiment/       # controlled HNDL harness
+├── benchmark/        # handshake measurement
+├── docs/             # architecture, threat model, evaluation, demo script
+├── scripts/run-demo.sh
+├── results/          # measured artifacts (generated)
 └── README.md
 ```
 
-## Run
+## Documentation Index
 
-From this directory:
+| Doc | Purpose |
+| --- | --- |
+| `docs/architecture.md` | Architecture + Mermaid diagrams |
+| `docs/threat-model.md` | Assets, threats, controls, out of scope |
+| `docs/evaluation.md` | Evaluation report structure |
+| `docs/demo-script.md` | 5–8 minute judge walkthrough |
+| `docs/competition-checklist.md` | Pre-presentation checklist |
 
-```bash
-go mod tidy   # optional; module is already defined
-```
-
-**Terminal 1 — server:**
-
-```bash
-go run . server
-```
-
-**Terminal 2 — client:**
-
-```bash
-go run . client
-```
-
-## Integration test
-
-```bash
-go test -v .
-```
-
-The test fails if the connection negotiates classical `X25519` or any group
-other than `X25519MLKEM768`, or if the TLS version is not 1.3.
-
-## Expected output
-
-### Server
+## Complete Prototype Progression
 
 ```text
-Go version: go1.26.0
-Configured key exchange: X25519MLKEM768
-Server listening on https://127.0.0.1:8443
-
-Connection received
-TLS Version: TLS 1.3
-Cipher Suite: TLS_AES_128_GCM_SHA256
-Key Exchange Group: X25519MLKEM768
-SUCCESS: X25519MLKEM768 negotiated
+Iteration 1 — Real TLS 1.3 hybrid handshake
+Iteration 2 — Configuration-driven crypto provider
+Iteration 3 — Cryptographic inventory / CBOM-inspired output
+Iteration 4 — Controlled HNDL secret-recovery experiment
+Iteration 5 — Policy enforcement + violation detection + performance measurement
 ```
-
-The exact cipher suite may vary (for example `TLS_AES_256_GCM_SHA384`). The
-invariant that must hold is:
 
 ```text
-Key Exchange Group: X25519MLKEM768
+Configure → Negotiate → Observe → Assess → Enforce → Measure → Reproduce → Present
 ```
-
-### Client
-
-```text
-Go version: go1.26.0
-Configured key exchange: X25519MLKEM768
-Connected successfully
-
-Server-reported TLS information:
-TLS Version: TLS 1.3
-Cipher Suite: TLS_AES_128_GCM_SHA256
-Key Exchange Group: X25519MLKEM768
-
-Client-observed negotiated group: X25519MLKEM768
-Client-observed TLS information:
-TLS Version: TLS 1.3
-Cipher Suite: TLS_AES_128_GCM_SHA256
-Key Exchange Group: X25519MLKEM768
-SUCCESS: X25519MLKEM768 negotiated
-```
-
-Both sides read the group from `tls.ConnectionState.CurveID` — values are not
-hard-coded in the response path beyond formatting that field.
-
-## Wireshark verification
-
-Do not rely only on application logs. Confirm the hybrid group on the wire:
-
-1. Start the server: `go run . server`
-2. Start Wireshark and capture the **loopback** interface (`lo` / `Loopback: lo`)
-3. Optional display filter: `tcp.port == 8443`
-4. Start the client: `go run . client`
-5. Locate the TLS **ClientHello**
-6. Expand **TLS → Handshake Protocol: Client Hello**
-7. Inspect:
-   - **supported_groups** — should list X25519MLKEM768
-   - **key_share** — should include a share for that group
-8. Identify the IANA code point:
-
-```text
-X25519MLKEM768 = 4588 = 0x11EC
-```
-
-In Wireshark this often appears as `x25519_mlkem768 (0x11ec)` or similar,
-depending on dissector version.
-
-```text
-Go ConnectionState.CurveID
-        +
-Wireshark ClientHello (supported_groups / key_share)
-        =
-independent evidence of hybrid negotiation
-```
-
-## Security limitations
-
-- Certificate verification is intentionally disabled on the client
-  (`InsecureSkipVerify`) for this localhost demo. **Do not use that in
-  production.**
-- This is a demonstration, not a production TLS deployment.
-- No attack simulation is performed.
-- No quantum computer is simulated.
-- No claims are made about breaking or resisting a real quantum attacker.
-- Later iterations will address crypto-policy, inventory/CBOM, downgrade
-  detection, and benchmarking.
